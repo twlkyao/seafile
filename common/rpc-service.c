@@ -1461,11 +1461,11 @@ seafile_set_repo_owner(const char *repo_id, const char *email,
 {
     if (!repo_id || !email) {
         g_set_error (error, SEAFILE_DOMAIN, SEAF_ERR_BAD_ARGS, "Argument should not be null");
-        return NULL;
+        return -1;
     }
     if (!is_uuid_valid (repo_id)) {
         g_set_error (error, SEAFILE_DOMAIN, SEAF_ERR_BAD_ARGS, "Invalid repo id");
-        return NULL;
+        return -1;
     }
 
     return seaf_repo_manager_set_repo_owner(seaf->repo_mgr, repo_id, email);
