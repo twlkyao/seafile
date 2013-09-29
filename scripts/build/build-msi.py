@@ -246,6 +246,9 @@ class Project(object):
             if run(cmd, cwd=self.projdir) != 0:
                 error('error when running command:\n\t%s\n' % cmd)
 
+def get_make_path():
+    return find_in_path('make.exe')
+
 class Libsearpc(Project):
     name = 'libsearpc'
 
@@ -253,8 +256,8 @@ class Libsearpc(Project):
         Project.__init__(self)
         self.build_commands = [
             'sh ./configure --prefix=%s --disable-compile-demo' % to_mingw_path(self.prefix),
-            'make',
-            'make install',
+            get_make_path(),
+            '%s install' % get_make_path(),
         ]
 
     def get_version(self):
@@ -267,8 +270,8 @@ class Ccnet(Project):
         Project.__init__(self)
         self.build_commands = [
             'sh ./configure --prefix=%s --disable-compile-demo' % to_mingw_path(self.prefix),
-            'make',
-            'make install',
+            get_make_path(),
+            '%s install' % get_make_path(),
         ]
 
     def get_version(self):
@@ -287,8 +290,8 @@ class Seafile(Project):
         Project.__init__(self)
         self.build_commands = [
             'sh ./configure --prefix=%s' % to_mingw_path(self.prefix),
-            'make',
-            'make install',
+            get_make_path(),
+            '%s install' % get_make_path(),
         ]
 
     def get_version(self):
@@ -305,9 +308,9 @@ class SeafileClient(Project):
     def __init__(self):
         Project.__init__(self)
         self.build_commands = [
-            'cmake -DCMAKE_INSTALL_PREFIX=%s .' % to_mingw_path(self.prefix),
-            'make',
-            'make install',
+            'cmake -G "MSYS Makefiles" -DCMAKE_INSTALL_PREFIX=%s .' % to_mingw_path(self.prefix),
+            get_make_path(),
+            '%s install' % get_make_path(),
         ]
 
     def get_version(self):
@@ -362,6 +365,7 @@ def validate_args(usage, options):
     check_targz_src('libsearpc', libsearpc_version, srcdir)
     check_targz_src('ccnet', ccnet_version, srcdir)
     check_targz_src('seafile', seafile_version, srcdir)
+    check_targz_src('seafile-client', seafile_client_version, srcdir)
 
     # [ builddir ]
     builddir = to_win_path(get_option(CONF_BUILDDIR))
@@ -524,10 +528,12 @@ def setup_build_env():
                      seperator=' ')
 
     prepend_env_value('PATH',
-                      to_mingw_path(os.path.join(prefix, 'bin')))
+                      os.path.join(prefix, 'bin'),
+                      seperator=';')
 
     prepend_env_value('PKG_CONFIG_PATH',
-                      to_mingw_path(os.path.join(prefix, 'lib', 'pkgconfig')))
+                      os.path.join(prefix, 'lib', 'pkgconfig'))
+                      # to_mingw_path(os.path.join(prefix, 'lib', 'pkgconfig')))
 
     # specifiy the directory for wix temporary files
     wix_temp_dir = os.path.join(conf[CONF_BUILDDIR], 'wix-temp')
@@ -567,7 +573,7 @@ def copy_shared_libs():
     '''
 
     output = os.path.join(conf[CONF_BUILDDIR], 'depends.csv')
-    applet = os.path.join(Seafile().projdir, 'gui', 'win', 'seafile-applet.exe')
+    applet = os.path.join(SeafileClient().projdir, 'seafile-applet.exe')
     cmd = 'depends.exe -c -f 1 -oc %s %s' % (output, applet)
 
     # See the manual of Dependency walker
@@ -597,7 +603,7 @@ def copy_dll_exe():
         os.path.join(prefix, 'bin', 'libseafile-0.dll'),
         os.path.join(prefix, 'bin', 'ccnet.exe'),
         os.path.join(prefix, 'bin', 'seaf-daemon.exe'),
-        os.path.join(Seafile().projdir, 'gui', 'win', 'seafile-applet.exe')
+        os.path.join(SeafileClient().projdir, 'seafile-applet.exe')
     ]
 
     for name in filelist:
@@ -619,29 +625,14 @@ def prepare_msi():
 
 def strip_symbols():
     bin_dir = os.path.join(conf[CONF_BUILDDIR], 'pack', 'bin')
-    ignored = []
     def do_strip(fn):
         run('strip "%s"' % fn)
         info('stripping: %s' % fn)
 
-    def should_ignore(path):
-        '''Do not strip python.dll and msvc*.dll '''
-        name = os.path.basename(path).lower()
-        return name.startswith('python') or name.startswith('msvc')
-
     for dll in glob.glob(os.path.join(bin_dir, '*.dll')):
-        if should_ignore(dll):
-            ignored.append(dll)
-        else:
+        name = os.path.basename(dll).lower()
+        if 'qt' in name:
             do_strip(dll)
-
-    for exe in glob.glob(os.path.join(bin_dir, '*.exe')):
-        do_strip(exe)
-
-    info('----------------------------')
-    info('ignored:')
-    for name in ignored:
-        info('>> %s' % name)
 
 def edit_fragment_wxs():
     '''In the main wxs file(seafile.wxs) we need to reference to the id of
@@ -667,6 +658,7 @@ def edit_fragment_wxs():
 
 def build_msi():
     prepare_msi()
+    strip_symbols()
     pack_dir = os.path.join(conf[CONF_BUILDDIR], 'pack')
     if run('make fragment.wxs', cwd=pack_dir) != 0:
         error('Error when make fragement.wxs')
@@ -678,21 +670,7 @@ def build_msi():
 
 def build_english_msi():
     '''The extra work to build the English msi.'''
-    gui_win = os.path.join(Seafile().projdir, 'gui', 'win')
     pack_dir = os.path.join(conf[CONF_BUILDDIR], 'pack')
-    pack_bin_dir = os.path.join(conf[CONF_BUILDDIR], 'pack', 'bin')
-
-    applet_en_name = 'seafile-applet.en.exe'
-    if run('make clean', cwd=gui_win) != 0:
-        error('Failed to run make clean in gui/win')
-
-    if run('make en', cwd=gui_win) != 0:
-        error('Failed to run make en in gui/win')
-
-    applet_en = os.path.join(gui_win, applet_en_name)
-    dst_applet_en = os.path.join(pack_bin_dir, 'seafile-applet.exe')
-
-    must_copy(applet_en, dst_applet_en)
 
     if run('make en', cwd=pack_dir) != 0:
         error('Error when make seafile-en.msi')
@@ -737,6 +715,7 @@ def main():
     libsearpc = Libsearpc()
     ccnet = Ccnet()
     seafile = Seafile()
+    seafile_client = SeafileClient()
 
     libsearpc.uncompress()
     libsearpc.build()
@@ -746,6 +725,9 @@ def main():
 
     seafile.uncompress()
     seafile.build()
+
+    seafile_client.uncompress()
+    seafile_client.build()
 
     build_msi()
     if not conf[CONF_ONLY_CHINESE]:
